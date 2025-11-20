@@ -1,0 +1,295 @@
+
+Project title:
+Microbiome data analysis of Zygnema green algae
+
+Please read the instruction before you running commands.
+We'll use this protocol command text file to provide all the commands and scripts for you (to avoid the ppt/word character formatting issue based on the previous experience).
+All commands and scripts will be saved here.
+
+The purpose of this project: 
+
+Learn how to use raw metagenome sequencing data (fastq file/files) to do read cleaning, assembly/binning, and finally get MAGs for analyzing protein sequences, annotations, and functions.
+
+For different programs, you would have two ways to run those:
+
+1, use the preinstalled programs on hcc, which is convenient for beginners. However, hcc may not have the latest versions, and may have no newly published programs. You could search which programs are available on hcc website: https://hcc.unl.edu/docs/applications/modules/available_software_for_swan/. You could ask HCC to install new programs that you need: https://hcc.unl.edu/software-installation-request
+
+2, I would recommand you using conda/mamba when you are more experienced. You could create your own software management environment on HCC and install your programs in that environment. Mamba is almost the same thing with Conda but much faster.
+
+#part0, raw data
+
+#in this project, we'll work on illumina pair-end metagenomic sequencing data of algae (Zygnematophyceae). It contains two raw read files: fastq1 and fastq2. The data consists of reads from both (host) algae and microbiome. We'll remove the algae data first and then focus on analyzing the microbiome data.
+
+#cp the read data folder by following steps:
+
+cd /work/fdst396/your_username
+
+mkdir final_project
+cd final_project
+cp -r /work/yinlab/mislam17/final_project/project_raw_data .
+
+
+#part_1, data preprocessing (~2hrs)
+
+#We need check the quality of sequencing data first, and trim low quality data to get better results.
+#we will use fastqc to do the quality check, and use trim_galore to do the trim.
+
+#1. quality check before trim (~5-10 mins)
+
+mkdir part_1_data_preprocessing
+cd part_1_data_preprocessing
+mkdir prefastqc
+cd prefastqc
+ml fastqc
+
+fastqc ../../project_raw_data/M2CH_S1_L002_R1_001.fastq.gz--outdir .
+fastqc ../../project_raw_data/M2CH_S1_L002_R2_001.fastq.gz--outdir .
+
+
+#you will get two pair of results: zip&html, zip file is the details of quality, and html is the visulization of result.
+#Download the html file to your laptop (use HCC ondemand) and see the results.
+#Report the results of quality check, and explain the meaning of each plot.
+
+#2. After that, we would delete those low quality reads by trimming using trim_galore (15 mins, depends the cores you used).
+
+#Remember to do module unload your_previous_program, because sometimes different program may cause conflicts.
+#won't remind you again.
+#for the long time progress, we will offer you slurms to submit jobs on hcc, use nano to edit and save, and then sbatch.
+
+cd ..
+mkdir trim
+cd trim
+
+#!/bin/bash
+#SBATCH --job-name=trim
+#SBATCH --time=124:00:00
+#SBATCH --mem=100gb
+#SBATCH --partition=batch,guest (reminder: you could add your own partition, i.e. benson or yinlab)
+#SBATCH --output=trim.%J.out
+#SBATCH --error=trim.%J.err
+#SBATCH --ntasks=20	
+#SBATCH --cpus-per-task=1
+
+module unload fastqc
+module load trim_galore/0.6
+
+trim_galore --paired /work/yinlab/mislam17/project_raw_data/M2CH_S1_L002_R1_001.fastq.gz  /work/yinlab/mislam17/project_raw_data/M2CH_S1_L002_R2_001.fastq.gz  -j 20
+
+# sbatch the job, you would get two trim reports, one for each fastq file.
+
+
+#3. Use fastqc again to check the quality again, and report the difference. You will get the trimmed read fastq files.
+
+# Run fastqc again
+
+cd ..
+mkdir postfastqc
+cd postfastqc
+ml fastqc
+
+fastqc ../trim/M2CH_S1_L002_R1_001_val_1.fq.gz --outdir .
+fastqc ../trim/M2CH_S1_L002_R2_001_val_2.fq.gz --outdir .
+
+
+#part2, remove algae genes from raw reads (~ 1-2 hrs).
+We want to analyze the microbiome data not the host data, so we need to remove those. Therefore, we need to prepare the reference genome file, which means the genomes we would like to remove, and use tools called Bowtie2 and samtools to do that. Here our reference genomes include algal nuclear genomes, plastid genomes, and mitogenomes sequencing by our lab. We'll then make index file for read mapping to the reference genomes. The algae_reference_genome.fna will be the reference genome file.
+
+cd ../../
+mkdir part_2_remove_algae_genomes
+cd part_2_remove_algae_genomes
+
+cp -r /work/yinlab/mislam17/final_project/reference_genome .
+cd reference_genome
+cat * > algae_reference_genome.fna 
+
+
+#!/bin/bash
+#SBATCH --job-name=Bowtie2
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --time=168:00:00
+#SBATCH --mem=30gb
+#SBATCH --output=Bowtie2.%J.out
+#SBATCH --error=Bowtie2.%J.err
+#SBATCH --partition=batch,guest
+
+ml bowtie/2.5
+
+ml samtools/1.9	
+
+bowtie2-build /work/yinlab/mislam17/final_project/part_2_remove_algae_genomes/reference_genome/algae_reference_genome.fna index_prefix
+
+bowtie2 -x index_prefix  -1 /work/yinlab/mislam17/final_project/part_1_data_preprocessing/trim/M2CH_S1_L002_R1_001_val_1.fq.gz -2 /work/yinlab/mislam17/final_project/part_1_data_preprocessing/trim/M2CH_S1_L002_R2_001_val_2.fq.gz -S bowtie2_alignments.sam --local -p $SLURM_NTASKS_PER_NODE
+
+samtools view -bS -@ 16 bowtie2_alignments.sam > bowtie2_alignments.bam
+
+samtools sort -@ 16 bowtie2_alignments.bam -o bowtie2_alignments.sorted.bam
+
+samtools index bowtie2_alignments.sorted.bam
+
+samtools view -b -f 12 -F 256 -@ 16 bowtie2_alignments.sorted.bam > unmapped.bam
+
+samtools fastq -@ 16 -1 unmapped_1.fastq -2 unmapped_2.fastq unmapped.bam
+
+
+# you will get two fastq files which contains reads unmapped to the algae genomes (i.e., de-contaminated reads).
+#check the outputs and find the meaning of those files, report those.
+
+
+ 
+#part3, assmebly with filtered reads (We will use two different tools : Megahit with ~40mins and MetaSPAde with ~8hrs).
+#you will compare the results between two tools.
+
+mkdir part_3_assmebly
+cd part_3_assmebly
+
+#!/bin/bash
+#SBATCH --job-name=megahit
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=32
+#SBATCH --time=168:00:00
+#SBATCH --mem=250gb
+#SBATCH --output=megahit.%J.out
+#SBATCH --error=megahit.%J.err
+#SBATCH --partition=yinlab,batch,guest
+
+ml megahit/1.2
+
+megahit  -1 /work/yinlab/mislam17/final_project/part_2_remove_algae_genomes/unmapped_1.fastq -2 /work/yinlab/mislam17/final_project/part_2_remove_algae_genomes/unmapped_2.fastq -o megahit_result -t 32
+
+
+
+#!/bin/bash
+#SBATCH --job-name=metaspade
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=32
+#SBATCH --time=168:00:00
+#SBATCH --mem=250gb
+#SBATCH --output=metaspade.%J.out
+#SBATCH --error=metaspade.%J.err
+#SBATCH --partition=yinlab,batch,guest
+
+ml spades/py35/3.13	
+
+spades.py --meta -1 /work/yinlab/mislam17/final_project/part_2_remove_algae_genomes/unmapped_1.fastq -2 /work/yinlab/mislam17/final_project/part_2_remove_algae_genomes/unmapped_2.fastq -o metaspade_result --threads 32
+
+
+#when the jobs are done, you would get two folders:
+#for the metaSPAde, it contains two results: contigs.fasta and scaffolds.fasta; we'll use contigs.fa to continue.
+#for the  megahit_result, we'll use final.contigs.fa.
+#you can compare the difference between two contig files (number, length, etc.).
+#for this project, we recommend to use megahit result for the all the following analyses.
+#but you are free to choose metaSPAde result, or do both
+
+### contig count and length
+ml seqkit
+seqkit stats your_contig_file.fa 
+
+
+#part4, bin contigs to make bins (MAGs) based on metawrap(~3.5 hrs).
+#your_assembly_contig_fasta_file is the file name of whichever assembly file you will use (contigs.fasta from metaSPAde or final.contigs.fa from megahit).
+
+mkdir part_4_binning
+cd part_4_binning
+
+#!/bin/bash
+#SBATCH --job-name=metawrap
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --time=168:00:00
+#SBATCH --mem=250gb
+#SBATCH --output=metawrap.%J.out
+#SBATCH --error=metawrap.%J.err
+#SBATCH --partition=yinlab,batch,guest
+
+ml metawrap/1.3
+
+metawrap binning -o BINNING_megahit -t 16 -a /work/yinlab/mislam17/final_project/part_3_assembly/megahit_result/final.contigs.fa --metabat2 --maxbin2 --concoct /work/yinlab/mislam17/final_project/part_2_remove_algae_genomes/unmapped_1.fastq /work/yinlab/mislam17/final_project/part_2_remove_algae_genomes/unmapped_2.fastq -t 16
+
+metawrap bin_refinement -o BIN_REFINEMENT_megahit -t 32 -A BINNING_megahit/metabat2_bins/ -B BINNING_megahit/maxbin2_bins/ -C BINNING_megahit/concoct_bins/
+
+#In the metawrap, it combines three different method to do the bins, and bin_refinement is to combine those results together and summarize to give the final result.
+
+#Compare those results and report. 
+#the final results are in BIN_REFINEMENT_megahit/metawrap_70_10_bins/*.fa, each of those means a MAG.
+
+
+#part5, check the quality of bins by CheckM2.
+
+mkdir part_5_checkm2
+cd part_5_checkm2
+
+#!/bin/bash
+#SBATCH --job-name=checkm2
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --time=168:00:00
+#SBATCH --mem=250gb
+#SBATCH --output=checkm2.%J.out
+#SBATCH --error=checkm2.%J.err
+#SBATCH --partition=batch,guest
+
+ml checkm2/1.0
+
+
+checkm2 predict --threads 16 --input ../part_4_binning/BIN_REFINEMENT_megahit/metawrap_70_10_bins/*.fa  --output-directory checkm2_result
+
+#report the results
+
+#part6, taxonomic annotation by GTDB (~1-2hrs).
+
+mkdir part_6_taxonomic_annotation
+cd part_6_taxonomic_annotation
+
+#!/bin/bash
+#SBATCH --job-name=gtdb
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --time=168:00:00
+#SBATCH --mem=250gb
+#SBATCH --output=gtdb.%J.out
+#SBATCH --error=gtdb.%J.err
+#SBATCH --partition=batch,guest
+
+ml gtdbtk/1.5
+
+gtdbtk classify_wf --genome_dir ../part_4_binning/BIN_REFINEMENT_megahit/metawrap_70_10_bins/ --out_dir GTDB/ --cpus 16 --extension .fa
+
+#you need to report the taxonomic assignment for each MAG from GTDB.
+
+
+#part7, use DRAM for MAG functional annotation.
+
+mkdir part_7_functional_annotation
+cd part_7_functional_annotation
+
+
+#!/bin/bash
+#SBATCH --job-name=dram
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --time=168:00:00
+#SBATCH --mem=20gb
+#SBATCH --output=dram.%J.out
+#SBATCH --error=dram.%J.err
+#SBATCH --partition=batch,guest
+
+ml dram/1.2
+
+DRAM.py annotate -i '../part_4_binning/BIN_REFINEMENT_megahit/metawrap_70_10_bins/*.fa' -o annotation
+DRAM.py distill -i annotation/annotations.tsv -o distill --trna_path annotation/trnas.tsv --rrna_path annotation/rrnas.tsv
+
+
+#report the results of DRAM.
+Listed below are resources that can help you to explain the results of DRAM.
+https://www.emsl.pnnl.gov/sites/default/files/2021-06/1.5.BortonShafferDRAM.pdf
+https://genomicsaotearoa.github.io/metagenomics_summer_school/day4/ex15_gene_annotation_part3/#dram-vpy-distill-output-files
+https://academic.oup.com/nar/article/48/16/8883/5884738
+
+
+
+
+
+
+
+
