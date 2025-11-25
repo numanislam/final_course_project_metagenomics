@@ -42,8 +42,9 @@ mkdir prefastqc
 cd prefastqc
 ml fastqc
 
-fastqc ../../project_raw_data/M2CH_S1_L002_R1_001.fastq.gz--outdir .
-fastqc ../../project_raw_data/M2CH_S1_L002_R2_001.fastq.gz--outdir .
+fastqc ../../project_raw_data/M2CH_S1_L002_R1_001.fastq.gz --outdir .
+
+fastqc ../../project_raw_data/M2CH_S1_L002_R2_001.fastq.gz --outdir .
 
 
 #you will get two pair of results: zip&html, zip file is the details of quality, and html is the visulization of result.
