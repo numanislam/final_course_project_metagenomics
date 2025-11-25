@@ -65,7 +65,7 @@ cd trim
 #SBATCH --job-name=trim
 #SBATCH --time=124:00:00
 #SBATCH --mem=100gb
-#SBATCH --partition=batch,guest (reminder: you could add your own partition, i.e. benson or yinlab)
+#SBATCH --partition=batch,guest
 #SBATCH --output=trim.%J.out
 #SBATCH --error=trim.%J.err
 #SBATCH --ntasks=20	
@@ -286,6 +286,7 @@ Listed below are resources that can help you to explain the results of DRAM.
 https://www.emsl.pnnl.gov/sites/default/files/2021-06/1.5.BortonShafferDRAM.pdf
 https://genomicsaotearoa.github.io/metagenomics_summer_school/day4/ex15_gene_annotation_part3/#dram-vpy-distill-output-files
 https://academic.oup.com/nar/article/48/16/8883/5884738
+
 
 
 
